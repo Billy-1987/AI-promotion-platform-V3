@@ -71,3 +71,16 @@ Three independent LLM calls run **in parallel** via `Promise.allSettled` / `Prom
 - Do not create new git branches unless requested (global rule).
 - Do not regenerate poster PNGs that already exist in `public/generated/` — the cache is intentional.
 - When adding a background to `mockAI.ts`, also add its scene description to `BG_SCENES` in `api/tryon/route.ts`, otherwise the image prompt falls back to "clean studio".
+
+## BigOffs 登录集成
+
+本项目已通过 bigoffs-login plugin 集成 BigOffs OAuth2 登录。
+
+- 登录入口：`src/components/LoginPage.tsx`（「使用 BigOffs 账号登录」按钮）
+- 回调地址：`src/app/auth/callback/page.tsx`（`/auth/callback`）
+- 后端接口：`src/app/api/auth/exchange/route.ts`（POST /api/auth/exchange，入参 code + redirect_uri，返回用户信息）
+- 配置：`.env.local` 的 BIGOFFS_CLIENT_ID / BIGOFFS_CLIENT_SECRET
+- 启动命令：`npm run dev`
+- 现有硬编码账号登录保留作为测试备用
+
+未来 Claude 会话在本项目工作时，无需重新扫描即可知道此集成已存在。

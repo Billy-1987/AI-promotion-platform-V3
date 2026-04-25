@@ -30,6 +30,28 @@ interface GeneratedImage {
   url: string
 }
 
+interface HistoryItem {
+  id: string
+  url: string
+  prompt: string
+  style: string
+  ratio: string
+  createdAt: number
+}
+
+const HISTORY_KEY = 'aipp_image_design_history'
+const HISTORY_MAX = 50
+
+function loadHistory(): HistoryItem[] {
+  try {
+    return JSON.parse(localStorage.getItem(HISTORY_KEY) ?? '[]')
+  } catch { return [] }
+}
+
+function saveHistory(items: HistoryItem[]) {
+  localStorage.setItem(HISTORY_KEY, JSON.stringify(items.slice(0, HISTORY_MAX)))
+}
+
 interface TextOverlay {
   content: string
   fontSize: number        // px relative to canvas width, e.g. 0.06
@@ -67,11 +89,28 @@ export default function ImageDesignStudio() {
   const [ratio, setRatio] = useState('1:1')
   const [count, setCount] = useState(1)
 
+  // Reference image
+  const [refImageBase64, setRefImageBase64] = useState<string | null>(null)
+  const [refImageMime, setRefImageMime] = useState<string>('image/jpeg')
+  const [refImagePreview, setRefImagePreview] = useState<string | null>(null)
+  const [refDragOver, setRefDragOver] = useState(false)
+  const refInputRef = useRef<HTMLInputElement>(null)
+
   // Generation state
   const [generating, setGenerating] = useState(false)
   const [images, setImages] = useState<GeneratedImage[]>([])
   const [error, setError] = useState<string | null>(null)
   const [selectedImage, setSelectedImage] = useState<string | null>(null)
+
+  // Detail modal
+  const [detailImage, setDetailImage] = useState<string | null>(null)
+  const [detailPrompt, setDetailPrompt] = useState('')
+  const [detailStyle, setDetailStyle] = useState('realistic')
+  const [detailRatio, setDetailRatio] = useState('1:1')
+
+  // History
+  const [history, setHistory] = useState<HistoryItem[]>([])
+  useEffect(() => { setHistory(loadHistory()) }, [])
 
   // Logo compositing state
   const [withLogo, setWithLogo] = useState(false)
@@ -100,12 +139,36 @@ export default function ImageDesignStudio() {
   const inlineInputRef = useRef<HTMLInputElement>(null)
   const draggingTextRef = useRef<{ idx: number; startX: number; startY: number; origX: number; origY: number } | null>(null)
 
-  async function handleGenerate() {
-    if (!prompt.trim()) return
+  // ── Reference image handlers ──────────────────────────────────
+  function handleRefFile(file: File) {
+    const reader = new FileReader()
+    reader.onload = e => {
+      const dataUrl = e.target?.result as string
+      setRefImagePreview(dataUrl)
+      const base64 = dataUrl.split(',')[1]
+      setRefImageBase64(base64)
+      setRefImageMime(file.type || 'image/jpeg')
+    }
+    reader.readAsDataURL(file)
+  }
+
+  function handleRefDrop(e: React.DragEvent) {
+    e.preventDefault()
+    setRefDragOver(false)
+    const file = e.dataTransfer.files[0]
+    if (file && file.type.startsWith('image/')) handleRefFile(file)
+  }
+
+  async function handleGenerate(overridePrompt?: string, overrideStyle?: string, overrideRatio?: string) {
+    const usePrompt = overridePrompt ?? prompt
+    const useStyle = overrideStyle ?? style
+    const useRatio = overrideRatio ?? ratio
+    if (!usePrompt.trim()) return
     setGenerating(true)
     setError(null)
     setImages([])
     setSelectedImage(null)
+    setDetailImage(null)
     setTextOverlays([])
     setShowTextEditor(false)
     setSelectedTextIdx(null)
@@ -117,10 +180,12 @@ export default function ImageDesignStudio() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: prompt.trim(),
-          style,
-          ratio,
+          prompt: usePrompt.trim(),
+          style: useStyle,
+          ratio: useRatio,
           count,
+          referenceImageBase64: refImageBase64 ?? undefined,
+          referenceImageMime: refImageBase64 ? refImageMime : undefined,
         }),
       })
       if (!res.ok) throw new Error('生成失败，请重试')
@@ -131,11 +196,36 @@ export default function ImageDesignStudio() {
       if (data.texts?.length) {
         setTextOverlays(data.texts.map((t: TextOverlay) => ({ ...t, locked: true })))
       }
+      // Save to history
+      const newItems: HistoryItem[] = data.images.map((img: GeneratedImage) => ({
+        id: img.id,
+        url: img.url,
+        prompt: usePrompt.trim(),
+        style: useStyle,
+        ratio: useRatio,
+        createdAt: Date.now(),
+      }))
+      const updated = [...newItems, ...loadHistory()].slice(0, HISTORY_MAX)
+      saveHistory(updated)
+      setHistory(updated)
     } catch (e) {
       setError(e instanceof Error ? e.message : '生成失败')
     } finally {
       setGenerating(false)
     }
+  }
+
+  function openDetail(url: string, p: string, s: string, r: string) {
+    setDetailImage(url)
+    setDetailPrompt(p)
+    setDetailStyle(s)
+    setDetailRatio(r)
+  }
+
+  function deleteHistory(id: string) {
+    const updated = loadHistory().filter(h => h.id !== id)
+    saveHistory(updated)
+    setHistory(updated)
   }
 
   // Reset compositing state when selected image changes
@@ -379,9 +469,37 @@ export default function ImageDesignStudio() {
       </nav>
 
       {/* Main */}
-      <main className="flex-1 w-full px-6 py-4 flex gap-6 overflow-hidden">
+      <main className="flex-1 w-full px-6 py-4 flex gap-4 overflow-hidden">
         {/* Left panel */}
-        <div className="w-80 flex-shrink-0 flex flex-col gap-3 overflow-y-auto">
+        <div className="w-72 flex-shrink-0 flex flex-col gap-3 overflow-y-auto">
+          {/* Reference image upload */}
+          <div className="glass-card rounded-2xl p-4">
+            <label className="block text-sm font-medium text-slate-700 mb-2">参考图（可选）</label>
+            {refImagePreview ? (
+              <div className="relative">
+                <img src={refImagePreview} alt="参考图" className="w-full h-32 object-cover rounded-xl" />
+                <button
+                  onClick={() => { setRefImagePreview(null); setRefImageBase64(null) }}
+                  className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-red-500 hover:bg-red-400 text-white flex items-center justify-center text-xs shadow"
+                >✕</button>
+              </div>
+            ) : (
+              <div
+                onDrop={handleRefDrop}
+                onDragOver={e => { e.preventDefault(); setRefDragOver(true) }}
+                onDragLeave={() => setRefDragOver(false)}
+                onClick={() => refInputRef.current?.click()}
+                className={`border-2 border-dashed rounded-xl h-24 flex flex-col items-center justify-center cursor-pointer transition-colors ${refDragOver ? 'border-blue-400 bg-blue-50' : 'border-slate-300 hover:border-blue-300 hover:bg-slate-50'}`}
+              >
+                <svg className="w-6 h-6 text-slate-400 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                </svg>
+                <p className="text-xs text-slate-400">拖拽或点击上传参考图</p>
+              </div>
+            )}
+            <input ref={refInputRef} type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleRefFile(f) }} />
+          </div>
+
           {/* Prompt */}
           <div className="glass-card rounded-2xl p-4 ring-2 ring-blue-300/40">
             <label className="block text-sm font-semibold text-slate-700 mb-2 flex items-center gap-1.5">
@@ -471,7 +589,7 @@ export default function ImageDesignStudio() {
 
           {/* Generate button */}
           <button
-            onClick={handleGenerate}
+            onClick={() => handleGenerate()}
             disabled={generating || !prompt.trim()}
             className="w-full py-3.5 rounded-xl font-semibold text-sm text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             style={{ background: '#0034cc' }}
@@ -525,11 +643,13 @@ export default function ImageDesignStudio() {
                 onTouchEnd={handleTouchEnd}
                 onClick={() => { setSelectedTextIdx(null); setInlineEditIdx(null) }}
               >
+                {/* 点击图片本体进入详情 */}
                 <img
                   src={selectedImage}
                   alt="Generated"
-                  className="w-full h-full object-contain rounded-xl"
+                  className="w-full h-full object-contain rounded-xl cursor-pointer"
                   draggable={false}
+                  onClick={e => { e.stopPropagation(); openDetail(selectedImage, prompt, style, ratio) }}
                 />
 
                 {/* 文字 HTML overlay — 始终显示，canvas 只用于下载合成 */}
@@ -873,7 +993,109 @@ export default function ImageDesignStudio() {
             </div>
           )}
         </div>
+
+        {/* History sidebar */}
+        <div className="w-44 flex-shrink-0 flex flex-col gap-2 overflow-y-auto">
+          <p className="text-xs font-semibold text-slate-500 px-1 flex-shrink-0">历史记录</p>
+          {history.length === 0 && (
+            <div className="flex-1 flex items-center justify-center">
+              <p className="text-xs text-slate-400 text-center">生成图片后<br/>将显示在这里</p>
+            </div>
+          )}
+          {history.map(item => (
+            <div key={item.id} className="relative group flex-shrink-0">
+              <button
+                onClick={() => openDetail(item.url, item.prompt, item.style, item.ratio)}
+                className="w-full rounded-xl overflow-hidden block"
+              >
+                <img src={item.url} alt="" className="w-full aspect-square object-cover rounded-xl hover:opacity-90 transition-opacity" />
+                <p className="text-xs text-slate-500 mt-1 px-0.5 truncate">{item.prompt}</p>
+              </button>
+              <button
+                onClick={() => deleteHistory(item.id)}
+                className="absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-red-500 hover:bg-red-400 text-white text-xs items-center justify-center shadow hidden group-hover:flex"
+              >✕</button>
+            </div>
+          ))}
+        </div>
       </main>
+
+      {/* Detail modal */}
+      {detailImage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={() => setDetailImage(null)}>
+          <div
+            className="relative bg-white rounded-2xl shadow-2xl flex overflow-hidden"
+            style={{ width: '85vw', maxWidth: 1100, height: '85vh' }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Close */}
+            <button
+              onClick={() => setDetailImage(null)}
+              className="absolute top-4 right-4 z-10 w-8 h-8 rounded-full bg-black/20 hover:bg-black/40 text-white flex items-center justify-center text-sm"
+            >✕</button>
+
+            {/* Image */}
+            <div className="flex-1 bg-slate-100 flex items-center justify-center p-6">
+              <img src={detailImage} alt="" className="max-w-full max-h-full object-contain rounded-xl shadow" />
+            </div>
+
+            {/* Right panel */}
+            <div className="w-72 flex-shrink-0 flex flex-col gap-4 p-6 border-l border-slate-100 overflow-y-auto">
+              <div>
+                <p className="text-xs text-slate-400 mb-1">提示词</p>
+                <p className="text-sm text-slate-800 leading-relaxed">{detailPrompt}</p>
+              </div>
+              <div className="flex gap-3">
+                <div>
+                  <p className="text-xs text-slate-400 mb-1">风格</p>
+                  <p className="text-sm font-medium text-slate-700">{STYLE_OPTIONS.find(s => s.value === detailStyle)?.label ?? detailStyle}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-400 mb-1">比例</p>
+                  <p className="text-sm font-medium text-slate-700">{detailRatio}</p>
+                </div>
+              </div>
+              <div className="flex flex-col gap-2 mt-auto">
+                <button
+                  onClick={() => {
+                    setPrompt(detailPrompt)
+                    setStyle(detailStyle)
+                    setRatio(detailRatio)
+                    setDetailImage(null)
+                    handleGenerate(detailPrompt, detailStyle, detailRatio)
+                  }}
+                  className="w-full py-2.5 rounded-xl text-white text-sm font-semibold flex items-center justify-center gap-2"
+                  style={{ background: '#0034cc' }}
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  重新生成
+                </button>
+                <button
+                  onClick={async () => {
+                    const a = document.createElement('a')
+                    a.href = detailImage!
+                    a.download = `ai-design-${Date.now()}.jpg`
+                    a.click()
+                    try {
+                      const { urlToDataUrl, saveToGallery } = await import('@/lib/gallery')
+                      const dataUrl = await urlToDataUrl(detailImage!)
+                      saveToGallery({ dataUrl, filename: a.download, source: 'image-design' })
+                    } catch {}
+                  }}
+                  className="w-full py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium flex items-center justify-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  下载图片
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -4,6 +4,21 @@ import { useState, FormEvent } from 'react'
 import { useAuth, TEST_ACCOUNTS } from '@/lib/auth'
 import Logo from './Logo'
 
+const BIGOFFS_CLIENT_ID = '4dNDohJceQKcGoKqadkBJiytX5VEO9tm'
+const BIGOFFS_AUTHORIZE_URL = 'https://oapi.bigoffs.com/oauth/authorize'
+
+function loginWithBigOffs() {
+  const state = crypto.randomUUID()
+  sessionStorage.setItem('bigoffs_state', state)
+  const params = new URLSearchParams({
+    client_id: BIGOFFS_CLIENT_ID,
+    redirect_uri: window.location.origin + '/auth/callback',
+    response_type: 'code',
+    state,
+  })
+  window.location.href = BIGOFFS_AUTHORIZE_URL + '?' + params
+}
+
 export default function LoginPage() {
   const { login } = useAuth()
   const [username, setUsername] = useState('')
@@ -81,6 +96,30 @@ export default function LoginPage() {
             }}
           >
             <h2 className="text-xl font-semibold text-white mb-6">登录账号</h2>
+
+            {/* BigOffs 登录按钮 */}
+            <button
+              type="button"
+              onClick={loginWithBigOffs}
+              className="w-full py-3 rounded-lg font-semibold text-sm transition-all flex items-center justify-center gap-2 mb-5"
+              style={{
+                background: '#fcea42',
+                color: '#0a0a1a',
+                boxShadow: '0 0 20px rgba(252, 234, 66, 0.3)',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 0 28px rgba(252, 234, 66, 0.5)')}
+              onMouseLeave={e => (e.currentTarget.style.boxShadow = '0 0 20px rgba(252, 234, 66, 0.3)')}
+            >
+              <img src="/bigoffs-logo.png" alt="" className="h-4 w-auto" />
+              使用 BigOffs 账号登录
+            </button>
+
+            <div className="flex items-center gap-3 mb-5">
+              <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.1)' }} />
+              <span className="text-xs text-slate-500">或使用测试账号</span>
+              <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.1)' }} />
+            </div>
+
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs text-slate-400 mb-1.5 uppercase tracking-wide">用户名</label>

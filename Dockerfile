@@ -8,12 +8,10 @@ RUN npm run build
 
 FROM node:20-alpine
 WORKDIR /app
-COPY --from=build /app/.next ./.next
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/package.json ./
-COPY --from=build /app/next.config.js ./
-COPY --from=build /app/postcss.config.js ./
-COPY --from=build /app/tailwind.config.js ./
-RUN mkdir -p data public/generated
+COPY --from=build /app/.next/standalone ./
+COPY --from=build /app/.next/static ./.next/static
+RUN mkdir -p public/generated data
 EXPOSE 3001
-CMD ["npx", "next", "start", "-p", "3001"]
+ENV PORT=3001
+ENV HOSTNAME=0.0.0.0
+CMD ["node", "server.js"]

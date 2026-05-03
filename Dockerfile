@@ -10,6 +10,7 @@ FROM node:20-alpine
 WORKDIR /app
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
+COPY --from=build /app/public ./public
 RUN mkdir -p public/generated data
 EXPOSE 3001
 ENV PORT=3001

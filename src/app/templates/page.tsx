@@ -206,12 +206,18 @@ function PreviewModal({
   function loadImage(src: string): Promise<HTMLImageElement> {
     return new Promise((resolve, reject) => {
       const img = new Image()
-      if (src.startsWith('http://') || src.startsWith('https://')) {
-        img.crossOrigin = 'anonymous'
-      }
       img.onload = () => resolve(img)
       img.onerror = reject
-      img.src = src
+      // 本地资源直接加载
+      if (!src.startsWith('http://') && !src.startsWith('https://')) {
+        img.src = src
+        return
+      }
+      // 外部 URL：先 fetch 转成 blob URL，避免 canvas CORS 污染
+      fetch(src)
+        .then(r => r.blob())
+        .then(blob => { img.src = URL.createObjectURL(blob) })
+        .catch(reject)
     })
   }
 
